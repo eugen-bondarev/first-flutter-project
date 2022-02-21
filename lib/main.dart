@@ -1,7 +1,34 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+
+import 'package:http/http.dart' as http;
+import 'package:sprintf/sprintf.dart';
 
 void main() {
   runApp(const MyApp());
+}
+
+class ColorManager {
+  static MaterialColor createMaterialColor(Color color) {
+    List strengths = <double>[.05];
+    final swatch = <int, Color>{};
+    final int r = color.red, g = color.green, b = color.blue;
+
+    for (int i = 1; i < 10; i++) {
+      strengths.add(0.1 * i);
+    }
+    for (var strength in strengths) {
+      final double ds = 0.5 - strength;
+      swatch[(strength * 1000).round()] = Color.fromRGBO(
+        r + ((ds < 0 ? r : (255 - r)) * ds).round(),
+        g + ((ds < 0 ? g : (255 - g)) * ds).round(),
+        b + ((ds < 0 ? b : (255 - b)) * ds).round(),
+        1,
+      );
+    }
+    return MaterialColor(color.value, swatch);
+  }
 }
 
 class MyApp extends StatelessWidget {
@@ -12,9 +39,10 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Flutter Demo',
       theme: ThemeData(
-        primarySwatch: Colors.red,
+        primarySwatch: ColorManager.createMaterialColor(const Color.fromRGBO(
+            22, 23, 52, 1.0)),
       ),
-      home: const MyHomePage(title: 'Learning flutter'),
+      home: const MyHomePage(title: 'Small Wikipedia Browser'),
     );
   }
 }
@@ -26,6 +54,22 @@ class MyHomePage extends StatefulWidget {
 
   @override
   State<MyHomePage> createState() => _MyHomePageState();
+}
+
+class Article {
+  String title = "";
+  String content = "";
+
+  Article(this.title, this.content);
+
+  bool isLoaded() {
+    return title.isNotEmpty && content.isNotEmpty;
+  }
+
+  void unload() {
+    title = "";
+    content = "";
+  }
 }
 
 class _MyHomePageState extends State<MyHomePage> {
@@ -46,8 +90,34 @@ class _MyHomePageState extends State<MyHomePage> {
     });
   }
 
-  void onSearchButtonPressed() {
+  late Article currentArticle = Article("", "");
 
+  void fetchArticle(String title) async {
+    // print(query);
+    String query = sprintf('https://de.wikipedia.org/w/api.php?action=query&format=json&prop=revisions&prop=extracts&explaintext=True&titles=%s', [title.replaceAll(" ", "_")]);
+    // print(query);
+    final response = await http
+        .get(Uri.parse(query));
+
+    if (response.statusCode == 200) {
+      var json = jsonDecode(response.body);
+      var responseQuery = json['query'];
+      var responsePages = responseQuery['pages'] as Map;
+      var firstKey = responsePages.keys.elementAt(0);
+
+      String title = responsePages[firstKey]['title'].toString();
+      String content = responsePages[firstKey]['extract'].toString();
+
+      currentArticle.unload();
+      currentArticle = Article(title, content);
+      setState(() {});
+    } else {
+      throw Exception('Failed to load album');
+    }
+  }
+
+  void onSearchButtonPressed() {
+    fetchArticle(label);
   }
 
   @override
@@ -69,13 +139,13 @@ class _MyHomePageState extends State<MyHomePage> {
                   Expanded(
                     flex: 3,
                     child:
-                    Container(
+                    SizedBox(
                       height: 80,
                       child:
                         TextField(
                             controller: textFieldController,
                             onChanged: onTextFieldChange,
-                            decoration: InputDecoration(
+                            decoration: const InputDecoration(
                                 border: OutlineInputBorder(),
                                 hintText: "Titel eines Wikipedia-Artikels"
                             )
@@ -85,39 +155,36 @@ class _MyHomePageState extends State<MyHomePage> {
                   Expanded(
                     flex: 1,
                     child:
-                      Container(
+                      SizedBox(
                         height: 60,
                         child:
                           ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              minimumSize: Size.fromHeight(40),
-                            ),
-                            onPressed: () {},
-                            child: Text('Suche'),
+                            onPressed: onSearchButtonPressed,
+                            child: const Text('Suche'),
                           )
                       )
                   )
                 ],
               )
             ),
-            Text(
-              textFieldController.text,
-            ),
-            const Text(
-              'You have pushed the button this many times:',
-            ),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headline1,
-            ),
+              if (currentArticle != null && currentArticle.isLoaded()) ...[
+              Text(
+                currentArticle.title,
+                style: Theme.of(context).textTheme.headline4,
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.vertical,
+                  child:
+                    Text(
+                      currentArticle.content
+                    )
+                )
+              )
+            ]
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
 }
